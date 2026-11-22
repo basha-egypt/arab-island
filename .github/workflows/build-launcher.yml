@@ -58,10 +58,8 @@ jobs:
                   raise SystemExit(f"PATCH FAILED: {pattern!r} not found in {path}")
               write(path, n)
 
-          # 1) Application id (Java package stays com.touch.mobile.dark on purpose:
-          #    libsamp.so only calls com.nvidia.devtech.*, but renaming Java packages is risky)
-          sub("android/app/build.gradle", r'applicationId "' + re.escape(PKG_OLD) + '"', f'applicationId "{PKG_NEW}"')
-          sub("android/app/src/main/AndroidManifest.xml", r'android:scheme="' + re.escape(PKG_OLD) + '"', f'android:scheme="{PKG_NEW}"')
+          # 1) Application id MUST stay com.touch.mobile.dark: libsamp.so hardcodes
+          #    /data/data/com.touch.mobile.dark/lib/libbass.so and .../android/data/com.touch.mobile.dark/files/
           sub("android/app/src/main/res/values/strings.xml", r'(<string name="app_name">)[^<]*(</string>)', r'\g<1>' + NAME + r'\g<2>')
           sub("app.json", r'"displayName":\s*"[^"]*"', f'"displayName": "{NAME}"')
 
@@ -183,7 +181,7 @@ jobs:
           URL_DONATE_API=$REL/donate.json
           URL_NEWS_API=$REL/news.json
           URL_DISTRIBUTION=$REL/distribution.json
-          PACKAGE_NAME=com.arabisland.launcher
+          PACKAGE_NAME=com.touch.mobile.dark
           PROJECT_NAME='Arab Island RP'
           APP_VERSION=$APP_VERSION
           LINK_FORUM_HELP=$DISCORD
@@ -261,7 +259,7 @@ jobs:
           const mb = (apk.length / 1048576).toFixed(1) + ' MB';
           const dist = {
             cache, cacheMode: [],
-            projectName: 'Arab Island RP', packageName: 'com.arabisland.launcher',
+            projectName: 'Arab Island RP', packageName: 'com.touch.mobile.dark',
             versionHash: Math.random().toString(36).substring(7),
             rss: `${REL}/launcher/news.json`,
             cdnCache: `${REL}/cache-v1`,

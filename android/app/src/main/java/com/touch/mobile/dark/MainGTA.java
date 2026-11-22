@@ -18,7 +18,7 @@ public class MainGTA extends WarMedia {
 
     private static void writeDebugLog(String msg) {
         try {
-            File dir = new File("/storage/emulated/0/Android/data/com.arabisland.launcher/files");
+            File dir = new File("/storage/emulated/0/Android/data/com.touch.mobile.dark/files");
             if (!dir.exists()) {
                 dir.mkdirs();
             }
