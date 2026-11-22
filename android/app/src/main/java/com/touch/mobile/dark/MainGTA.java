@@ -1,9 +1,7 @@
 package com.touch.mobile.dark;
 
 import android.content.Intent;
-import android.content.res.Configuration;
 import android.os.Bundle;
-import android.view.KeyEvent;
 
 import com.wardrumstudios.utils.WarMedia;
 
@@ -40,34 +38,29 @@ public class MainGTA extends WarMedia {
             vmVersion = System.getProperty("java.vm.version");
             System.out.println("vmVersion " + vmVersion);
             writeDebugLog("vmVersion: " + vmVersion);
-            System.loadLibrary("ImmEmulatorJ");
-            writeDebugLog("Loaded ImmEmulatorJ");
         } catch (Throwable t) {
-            writeDebugLog("ImmEmulatorJ err: " + t);
+            writeDebugLog("vmVersion err: " + t);
         }
 
-        try {
-            writeDebugLog("Before loadLibrary GTASA");
-            System.loadLibrary("GTASA");
-            writeDebugLog("After loadLibrary GTASA");
-        } catch (Throwable t) {
-            writeDebugLog("GTASA load err: " + t);
-            throw t;
-        }
-
-        try {
-            writeDebugLog("Before loadLibrary samp");
-            System.loadLibrary("samp");
-            writeDebugLog("After loadLibrary samp");
-        } catch (Throwable t) {
-            writeDebugLog("samp load err: " + t);
-            throw t;
+        String[] libs = {"ImmEmulatorJ", "SCAnd", "bass", "GTASA", "samp"};
+        for (String lib : libs) {
+            try {
+                writeDebugLog("Before loadLibrary " + lib);
+                System.loadLibrary(lib);
+                writeDebugLog("After loadLibrary " + lib);
+            } catch (Throwable t) {
+                writeDebugLog("Load err " + lib + ": " + t);
+                if ("GTASA".equals(lib) || "samp".equals(lib)) {
+                    throw t;
+                }
+            }
         }
     }
 
     public boolean ServiceAppCommand(String str, String str2) {
         return false;
     }
+
     public int ServiceAppCommandValue(String str, String str2) {
         return 0;
     }
@@ -76,59 +69,56 @@ public class MainGTA extends WarMedia {
         super.onActivityResult(i, i2, intent);
     }
 
-    public void onConfigurationChanged(Configuration configuration) {
-        super.onConfigurationChanged(configuration);
-    }
-
+    @Override
     public void onCreate(Bundle bundle) {
         writeDebugLog("MainGTA onCreate start");
-        if(!once) {
-            once = true;
-        }
-
-        System.out.println("MainGTA onCreate");
         self = this;
-        wantsMultitouch = true;
-        wantsAccelerometer = true;
-        super.onCreate(bundle);
-        Utils.currentContext = this;
+        try {
+            System.out.println("MainGTA onCreate");
+            super.onCreate(bundle);
+        } catch (Throwable t) {
+            writeDebugLog("MainGTA super.onCreate err: " + t);
+            throw t;
+        }
         writeDebugLog("MainGTA onCreate end");
     }
 
+    @Override
     public void onDestroy() {
         writeDebugLog("MainGTA onDestroy");
         System.out.println("MainGTA onDestroy");
         super.onDestroy();
     }
 
-    public boolean onKeyDown(int i, KeyEvent keyEvent) {
-        return super.onKeyDown(i, keyEvent);
-    }
-
+    @Override
     public void onPause() {
         writeDebugLog("MainGTA onPause");
         System.out.println("MainGTA onPause");
         super.onPause();
     }
 
+    @Override
     public void onRestart() {
         writeDebugLog("MainGTA onRestart");
         System.out.println("MainGTA onRestart");
         super.onRestart();
     }
 
+    @Override
     public void onResume() {
         writeDebugLog("MainGTA onResume");
         System.out.println("MainGTA onResume");
         super.onResume();
     }
 
+    @Override
     public void onStart() {
         writeDebugLog("MainGTA onStart");
         System.out.println("MainGTA onStart");
         super.onStart();
     }
 
+    @Override
     public void onStop() {
         writeDebugLog("MainGTA onStop");
         System.out.println("MainGTA onStop");
