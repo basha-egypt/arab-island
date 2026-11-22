@@ -608,7 +608,9 @@ public abstract class NvEventQueueActivity
             //getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
 
+        writeNvDebugLog("NvEvent: Before systemInit()");
         systemInit();
+        writeNvDebugLog("NvEvent: After systemInit()");
 
         hideSystemUI();
 
@@ -655,7 +657,9 @@ public abstract class NvEventQueueActivity
             }
             else if (!GameIsFocused && hasFocus)
             {
+                writeNvDebugLog("NvEvent: Before resumeEvent()");
                 resumeEvent();
+                writeNvDebugLog("NvEvent: After resumeEvent()");
             }
             GameIsFocused = hasFocus;
         }
@@ -674,6 +678,7 @@ public abstract class NvEventQueueActivity
     @Override
     protected void onResume()
     {
+        writeNvDebugLog("NvEvent: onResume");
         System.out.println("**** onResume");
         super.onResume();
         if(mSensorManager != null)
@@ -1000,6 +1005,7 @@ public abstract class NvEventQueueActivity
             // @Override
             public void surfaceCreated(SurfaceHolder holder)
             {
+                writeNvDebugLog("NvEvent: surfaceCreated");
                 System.out.println("systemInit.surfaceCreated");
                 @SuppressWarnings("unused")
                 boolean firstRun = cachedSurfaceHolder == null;
@@ -1042,7 +1048,9 @@ public abstract class NvEventQueueActivity
                     resumeEvent();
                     System.out.println("returned from resumeEvent");
                 }
+                writeNvDebugLog("NvEvent: Before setWindowSize()");
                 setWindowSize(surfaceWidth, surfaceHeight);
+                writeNvDebugLog("NvEvent: After setWindowSize()");
             }
 
             /**
