@@ -1,0 +1,297 @@
+name: Build Arab Island Launcher
+
+# Run manually: Actions tab -> "Build Arab Island Launcher" -> Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: "Launcher version (raise it for every new release, e.g. 1.0.1)"
+        default: "1.0.0"
+      cache_url:
+        description: "Cache zip URL"
+        default: "https://github.com/deskar77/Arab-Island-RP/releases/download/cache-v1/Cache.zip"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      REPO: ${{ github.repository }}
+      APP_VERSION: ${{ inputs.app_version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 16
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 11
+
+      - name: Android SDK pieces
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-33" "build-tools;33.0.0" "ndk;21.4.7075529"
+
+      - name: Patch project for Arab Island RP
+        run: |
+          cat > /tmp/patch.py <<'PYEOF'
+          import json, os, re, pathlib
+
+          PKG_NEW = "com.arabisland.launcher"
+          PKG_OLD = "com.touch.mobile.dark"
+          NAME = "Arab Island RP"
+
+          def read(p): return pathlib.Path(p).read_text(encoding="utf-8")
+          def write(p, s): pathlib.Path(p).write_text(s, encoding="utf-8")
+
+          def sub(path, pattern, repl, flags=0, must=True):
+              s = read(path)
+              n, cnt = re.subn(pattern, repl, s, flags=flags)
+              if must and cnt == 0:
+                  raise SystemExit(f"PATCH FAILED: {pattern!r} not found in {path}")
+              write(path, n)
+
+          # 1) Application id (Java package stays com.touch.mobile.dark on purpose:
+          #    libsamp.so only calls com.nvidia.devtech.*, but renaming Java packages is risky)
+          sub("android/app/build.gradle", r'applicationId "' + re.escape(PKG_OLD) + '"', f'applicationId "{PKG_NEW}"')
+          sub("android/app/src/main/AndroidManifest.xml", r'android:scheme="' + re.escape(PKG_OLD) + '"', f'android:scheme="{PKG_NEW}"')
+          sub("android/app/src/main/res/values/strings.xml", r'(<string name="app_name">)[^<]*(</string>)', r'\g<1>' + NAME + r'\g<2>')
+          sub("app.json", r'"displayName":\s*"[^"]*"', f'"displayName": "{NAME}"')
+
+          # 2) Remove the original author's Firebase (google-services.json belongs to his project)
+          sub("android/app/build.gradle", r"^apply plugin: 'com\.google\.gms\.google-services'\s*$", "", flags=re.M)
+          sub("android/app/build.gradle", r"^apply plugin: 'com\.google\.firebase\.crashlytics'\s*$", "", flags=re.M)
+          sub("android/app/build.gradle", r"firebaseCrashlytics\s*\{[^{}]*\}", "")
+          sub("android/build.gradle", r"^\s*classpath\s*\(?\s*'com\.google\.gms:google-services[^\n]*\n", "", flags=re.M)
+          sub("android/build.gradle", r"^\s*classpath\s*\(?\s*'com\.google\.firebase:firebase-crashlytics-gradle[^\n]*\n", "", flags=re.M)
+          for f in ("android/app/google-services.json", "firebase.json"):
+              if os.path.exists(f): os.remove(f)
+
+          pkg = json.loads(read("package.json"))
+          for sec in ("dependencies", "devDependencies"):
+              for k in list(pkg.get(sec, {})):
+                  if k.startswith("@react-native-firebase/"):
+                      del pkg[sec][k]
+          pkg["dependencies"]["react-native-zip-archive"] = "^6.1.0"
+          pkg["name"] = "ArabIslandLauncher"
+          write("package.json", json.dumps(pkg, indent=2, ensure_ascii=False))
+
+          sub("src/thunks/notificationThunks.ts", r"import messaging from '@react-native-firebase/messaging';\n", "")
+          sub("src/thunks/notificationThunks.ts", r"\s*await messaging\(\)\.registerDeviceForRemoteMessages\(\);", "")
+
+          # 3) Single-zip cache download (GitHub Releases cannot host a folder tree)
+          sub("src/services/distribution.service.ts", r"cdnCache: string;", "cdnCache: string;\n  cdnCacheZip?: string;")
+          sub("src/thunks/loaderThunks.ts", r"import RNFS from 'react-native-fs';",
+              "import RNFS from 'react-native-fs';\nimport { unzip } from 'react-native-zip-archive';")
+          sub("src/thunks/loaderThunks.ts", r"  FileName,\n  FileValidate,\n\} from '../features/fileManager';",
+              "  FileName,\n  FilePath,\n  FileValidate,\n} from '../features/fileManager';")
+
+          ZIP_BLOCK = """
+            const cdnCacheZip = (state().distribution as any).cdnCacheZip as string | undefined;
+            if (cdnCacheZip) {
+              try {
+                const dest = FilePath.getPathDirCache();
+                const zipPath = `${dest}/cache_download.zip`;
+                await FilePath.createPathCache(dest, '');
+                if (await RNFS.exists(zipPath)) {
+                  await RNFS.unlink(zipPath);
+                }
+
+                const zipRes = await RNFS.downloadFile({
+                  fromUrl: cdnCacheZip,
+                  toFile: zipPath,
+                  progressInterval: 800,
+                  begin: ({ contentLength }) => {
+                    dispatch(
+                      setDownloadLoader({
+                        download: {
+                          fileName: 'Cache.zip',
+                          currentBytes: 0,
+                          needBytes: contentLength,
+                          numberOfDownloads: 0,
+                          downloadBytes: 0,
+                        },
+                      }),
+                    );
+                  },
+                  progress: ({ bytesWritten }: DownloadProgressType) => {
+                    dispatch(
+                      setDownloadLoader({
+                        download: { currentBytes: bytesWritten, downloadBytes: bytesWritten },
+                      }),
+                    );
+                  },
+                }).promise;
+
+                if (zipRes.statusCode !== 200) {
+                  throw new Error('zip download failed: ' + zipRes.statusCode);
+                }
+
+                dispatch(
+                  setDownloadLoader({
+                    download: { fileName: 'Extracting...', currentBytes: 0 },
+                  }),
+                );
+                await unzip(zipPath, dest);
+                await RNFS.unlink(zipPath);
+
+                dispatch(onUploadTaskEventLoader({ status: 'complete' }));
+                dispatch(fetchIsDownloadSuccess());
+                return navigationRef.current?.dispatch(StackActions.replace('Main'));
+              } catch (error) {
+                dispatch(onUploadTaskEventLoader({ status: 'complete' }));
+                return navigationRef.current?.dispatch(StackActions.replace('Error'));
+              }
+            }
+          """
+          sub("src/thunks/loaderThunks.ts", r"(  for await \(const cache of needDownload\) \{\n    const \{ id, path: toFile)",
+              lambda m: ZIP_BLOCK + "\n" + m.group(1))
+
+          # 4) Colours: blue -> purple/blue brand palette
+          PALETTE = {
+              "#5476db": "#7c3aed", "#6b8afd": "#a855f7", "#647fd3": "#6d28d9",
+              "#8ab5f3": "#60a5fa", "#719ff0": "#3b82f6", "#d4ddff": "#e9d5ff",
+          }
+          for root, _, files in os.walk("src"):
+              for fn in files:
+                  if fn.endswith((".ts", ".tsx")):
+                      p = os.path.join(root, fn); s = read(p); o = s
+                      for a, b in PALETTE.items():
+                          s = re.sub(re.escape(a), b, s, flags=re.I)
+                      if s != o: write(p, s)
+          print("patch ok")
+          PYEOF
+          python3 /tmp/patch.py
+
+      - name: Write .env
+        run: |
+          DISCORD="https://discord.gg/wh5gSh2rFw"
+          REL="https://github.com/${REPO}/releases/download/launcher"
+          cat > .env <<EOF
+          LINK_SITE=$DISCORD
+          LINK_VK=$DISCORD
+          LINK_DISCORD=$DISCORD
+          LINK_TIKTOK=$DISCORD
+          LINK_DONATE=$DISCORD
+          URL_DONATE_API=$REL/donate.json
+          URL_NEWS_API=$REL/news.json
+          URL_DISTRIBUTION=$REL/distribution.json
+          PACKAGE_NAME=com.arabisland.launcher
+          PROJECT_NAME='Arab Island RP'
+          APP_VERSION=$APP_VERSION
+          LINK_FORUM_HELP=$DISCORD
+          LINK_SITE_STORAGE=$DISCORD
+          LINK_SITE_NEWS=$DISCORD
+          EOF
+          sed -i 's/^ *//' .env
+
+      - name: Branding (logo + app icon)
+        run: |
+          if [ -f branding/logo.png ]; then
+            cp branding/logo.png src/assets/images/logo.png
+            for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+              dir=android/app/src/main/res/mipmap-${d%%:*}; sz=${d##*:}
+              for n in ic_launcher ic_launcher_round; do
+                [ -f "$dir/$n.png" ] && convert branding/logo.png -resize ${sz}x${sz} -background none -gravity center -extent ${sz}x${sz} "$dir/$n.png" || true
+              done
+            done
+          else
+            echo "No branding/logo.png found - keeping default logo"
+          fi
+
+      - name: Download and check cache zip
+        run: |
+          mkdir -p work/cache
+          curl -L --fail -o work/Cache.zip "${{ inputs.cache_url }}"
+          unzip -q work/Cache.zip -d work/cache
+          # If everything is inside ONE wrapper folder, repack so the game folders sit at the zip root
+          if [ "$(ls -A work/cache | wc -l)" = "1" ] && [ -d "work/cache/$(ls work/cache)" ]; then
+            echo "Wrapper folder detected - repacking"
+            inner="work/cache/$(ls work/cache)"
+            (cd "$inner" && zip -qr -0 ../../Cache_fixed.zip .)
+            mv work/Cache_fixed.zip work/Cache.zip
+            rm -rf work/cache && mkdir work/cache && unzip -q work/Cache.zip -d work/cache
+            gh release upload cache-v1 work/Cache.zip --clobber
+          fi
+          echo "Top level of cache zip:"; ls work/cache
+          find work/cache -type f | wc -l
+
+      - name: Install dependencies
+        run: yarn install --network-timeout 600000
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Generate distribution.json
+        run: |
+          APK=$(find android/app/build/outputs/apk/release -name '*.apk' | head -n1)
+          echo "APK: $APK"
+          cat > /tmp/gen.js <<'JSEOF'
+          // usage: node gen.js <cacheDir> <apkPath> <outDir>
+          const fs = require('fs'), path = require('path'), crypto = require('crypto');
+          const [cacheDir, apkPath, outDir] = process.argv.slice(2);
+          const REPO = process.env.REPO, VERSION = process.env.APP_VERSION;
+          const REL = `https://github.com/${REPO}/releases/download`;
+          const IGNORE = ['samp_log.txt', 'crash_log.log', 'gtasatelem.set'];
+
+          const gpu = n => /\.dxt\.(toc|tmb|dat)$/.test(n) ? 'A'
+            : /\.etc\.(toc|tmb|dat)$/.test(n) ? 'M'
+            : /\.pvr\.(toc|tmb|dat)$/.test(n) ? 'PT' : '';
+
+          const cache = []; let id = 1;
+          (function walk(dir, rel) {
+            for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+              if (e.isDirectory()) walk(path.join(dir, e.name), rel ? rel + '/' + e.name : e.name);
+              else if (!IGNORE.includes(e.name))
+                cache.push({ id: id++, name: e.name, path: rel, bytes: [fs.statSync(path.join(dir, e.name)).size], gpu: gpu(e.name) });
+            }
+          })(cacheDir, '');
+
+          const apk = fs.readFileSync(apkPath);
+          const mb = (apk.length / 1048576).toFixed(1) + ' MB';
+          const dist = {
+            cache, cacheMode: [],
+            projectName: 'Arab Island RP', packageName: 'com.arabisland.launcher',
+            versionHash: Math.random().toString(36).substring(7),
+            rss: `${REL}/launcher/news.json`,
+            cdnCache: `${REL}/cache-v1`,
+            cdnCacheZip: `${REL}/cache-v1/Cache.zip`,
+            cdnLauncher: `${REL}/launcher`,
+            filesContinue: ['settings.ini', 'gta_sa.set', 'svconfig.ini'],
+            launcher: { appVersion: VERSION, name: 'app-release.apk', hash: crypto.createHash('md5').update(apk).digest('hex'), bytes: apk.length, size: mb, mtime: Math.floor(Date.now() / 1000) },
+            servers: [{
+              id: 1, show: true, version: '1.0',
+              icon: `https://raw.githubusercontent.com/${REPO}/main/branding/logo.png`,
+              events: [], slot: 1000, bonus: false,
+              name: 'Arab Island RP', description: 'Arab Island Roleplay',
+              address: '185.211.103.215:4981', sampVersion: '0.3.7',
+            }],
+          };
+          fs.mkdirSync(outDir, { recursive: true });
+          fs.writeFileSync(path.join(outDir, 'distribution.json'), JSON.stringify(dist, null, 2));
+          fs.writeFileSync(path.join(outDir, 'news.json'), '[]');
+          fs.writeFileSync(path.join(outDir, 'donate.json'), '[[],[]]');
+          fs.copyFileSync(apkPath, path.join(outDir, 'app-release.apk'));
+          console.log(`distribution.json: ${cache.length} cache files, apk ${mb}`);
+          JSEOF
+          node /tmp/gen.js work/cache "$APK" dist
+
+      - name: Publish to release "launcher"
+        run: |
+          gh release view launcher >/dev/null 2>&1 || gh release create launcher --title "Launcher" --notes "Auto-built launcher + distribution.json"
+          gh release upload launcher dist/* --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-files
+          path: dist/
