@@ -553,6 +553,21 @@ public abstract class NvEventQueueActivity
     public native void nvAcquireTimeExtension();
     public native long nvGetSystemTime();
 
+
+    private static void writeNvDebugLog(String msg) {
+        try {
+            java.io.File dir = new java.io.File("/storage/emulated/0/Android/data/com.touch.mobile.dark/files");
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            java.io.File logFile = new java.io.File(dir, "crash_debug.txt");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile, true);
+            fos.write((msg + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            fos.close();
+        } catch (Throwable ignored) {
+        }
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState)
     {
@@ -562,9 +577,13 @@ public abstract class NvEventQueueActivity
         if(supportPauseResume)
         {
             System.out.println("Calling init(false)");
+            writeNvDebugLog("NvEvent: Before init(false)");
             init(false);
+            writeNvDebugLog("NvEvent: After init(false)");
             System.out.println("Calling initSAMP");
+            writeNvDebugLog("NvEvent: Before initSAMP()");
             initSAMP();
+            writeNvDebugLog("NvEvent: After initSAMP()");
             System.out.println("Called");
         }
         handler = new Handler();
