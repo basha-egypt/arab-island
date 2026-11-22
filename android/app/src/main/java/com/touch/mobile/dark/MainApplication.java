@@ -9,6 +9,7 @@ import android.system.Os;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.Arrays;
 import com.facebook.react.PackageList;
 import com.facebook.react.ReactApplication;
 import com.facebook.react.ReactInstanceManager;
@@ -64,6 +65,7 @@ public class MainApplication extends MultiDexApplication implements ReactApplica
     super.onCreate();
     prepareNativeLibLink();
     saveLastNativeCrash();
+    dumpFilesTree();
     // If you opted-in for the New Architecture, we enable the TurboModule system
     ReactFeatureFlags.useTurboModules = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED;
     SoLoader.init(this, /* native exopackage */ false);
@@ -82,6 +84,48 @@ public class MainApplication extends MultiDexApplication implements ReactApplica
         Os.symlink(getApplicationInfo().nativeLibraryDir, link.getAbsolutePath());
       }
     } catch (Throwable ignored) {
+    }
+  }
+
+  /** Debug: writes files/tree.txt = device info + every game file with its size. */
+  private void dumpFilesTree() {
+    new Thread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          File root = getExternalFilesDir(null);
+          if (root == null) return;
+          StringBuilder sb = new StringBuilder();
+          sb.append("device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n');
+          sb.append("hardware: ").append(Build.HARDWARE).append(" board: ").append(Build.BOARD).append('\n');
+          sb.append("android sdk: ").append(Build.VERSION.SDK_INT).append('\n');
+          sb.append("abis: ").append(Arrays.toString(Build.SUPPORTED_ABIS)).append('\n');
+          sb.append("nativeLibDir: ").append(getApplicationInfo().nativeLibraryDir).append('\n');
+          File bass = new File("/data/data/" + getPackageName() + "/lib/libbass.so");
+          sb.append("libbass link ok: ").append(bass.exists()).append('\n');
+          sb.append("root: ").append(root.getAbsolutePath()).append("\n\n");
+          walkTree(root, root.getAbsolutePath().length() + 1, sb, new int[] {0});
+          try (FileOutputStream out = new FileOutputStream(new File(root, "tree.txt"))) {
+            out.write(sb.toString().getBytes("UTF-8"));
+          }
+        } catch (Throwable ignored) {
+        }
+      }
+    }).start();
+  }
+
+  private static void walkTree(File dir, int cut, StringBuilder sb, int[] count) {
+    File[] list = dir.listFiles();
+    if (list == null) return;
+    Arrays.sort(list);
+    for (File f : list) {
+      if (count[0] > 6000) return;
+      if (f.isDirectory()) {
+        walkTree(f, cut, sb, count);
+      } else {
+        count[0]++;
+        sb.append(f.getAbsolutePath().substring(cut)).append("  ").append(f.length()).append('\n');
+      }
     }
   }
 
